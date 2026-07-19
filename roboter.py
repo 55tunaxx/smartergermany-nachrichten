@@ -20,9 +20,11 @@ socket.setdefaulttimeout(15)  # asılı kalan kaynak tüm robotu bekletmesin
 CIKTI = os.path.join(os.path.dirname(os.path.abspath(__file__)),
                      "nachrichten.json")
 GEMINI_KEY = os.environ.get("GEMINI_KEY", "").strip()
-GEMINI_MODEL = "gemini-2.5-flash"
-YAZIM_SINIRI = 25          # tek çalışmada en fazla bu kadar YENİ haber yazılır
-PARTI = 8                  # Gemini'ye tek istekte kaç haber verilir
+# Sıra önemli: önce bedava kotası yüksek hafif modeller denenir.
+GEMINI_MODELLER = ["gemini-2.5-flash-lite", "gemini-2.0-flash",
+                   "gemini-2.5-flash"]
+YAZIM_SINIRI = 24          # tek çalışmada en fazla bu kadar YENİ haber yazılır
+PARTI = 12                 # Gemini'ye tek istekte kaç haber verilir
 UST_SINIR = 90             # JSON'a girecek toplam haber
 
 QUELLEN = [
@@ -151,7 +153,7 @@ def eski_yazilanlar():
         return {}
 
 
-def gemini_yaz(parti):
+def gemini_yaz(parti, model):
     """Bir grup habere özgün başlık+metin yazdırır. [{n,titel,text}] döner."""
     girdi = [{"n": i, "titel": h["t"], "info": h["b"][:400],
               "kategorie": h["k"]} for i, h in enumerate(parti)]
@@ -167,16 +169,19 @@ def gemini_yaz(parti):
             "\"text\":\"...\"}, ...]\n\nMeldungen:\n"
             + json.dumps(girdi, ensure_ascii=False))}]}],
         "generationConfig": {"response_mime_type": "application/json",
-                             "temperature": 0.4},
+                             "temperature": 0.4,
+                             "maxOutputTokens": 8192},
     }
     url = (f"https://generativelanguage.googleapis.com/v1beta/models/"
-           f"{GEMINI_MODEL}:generateContent?key={GEMINI_KEY}")
+           f"{model}:generateContent?key={GEMINI_KEY}")
     r = urllib.request.Request(
         url, data=json.dumps(istek).encode("utf-8"),
         headers={"Content-Type": "application/json"})
-    with urllib.request.urlopen(r, timeout=90) as cevap:
+    with urllib.request.urlopen(r, timeout=120) as cevap:
         yanit = json.load(cevap)
-    metin = yanit["candidates"][0]["content"]["parts"][0]["text"]
+    metin = yanit["candidates"][0]["content"]["parts"][0]["text"].strip()
+    # Bazı modeller JSON'u ``` çiti içinde döndürür — soy
+    metin = re.sub(r"^```(json)?\s*|\s*```$", "", metin)
     return json.loads(metin)
 
 
@@ -197,20 +202,37 @@ def main():
     yazilacak = [h for h in haberler if not h.get("ki")][:YAZIM_SINIRI]
 
     if GEMINI_KEY and yazilacak:
+        model_sirasi = list(GEMINI_MODELLER)
         for i in range(0, len(yazilacak), PARTI):
             parti = yazilacak[i:i + PARTI]
-            try:
-                sonuc = gemini_yaz(parti)
-                for satir in sonuc:
-                    h = parti[satir["n"]]
-                    titel = (satir.get("titel") or "").strip()
-                    text = (satir.get("text") or "").strip()
-                    if len(text) > 80 and len(titel) > 8:
-                        h["t"], h["b"], h["ki"] = titel, text, True
-                        yeni_yazim += 1
-            except Exception as hata:
-                print(f"  ! Gemini partisi atlandı: {hata}")
-            time.sleep(2)  # dakikalık istek limitine nazik davran
+            basarili = False
+            for model in list(model_sirasi):
+                try:
+                    sonuc = gemini_yaz(parti, model)
+                    for satir in sonuc:
+                        h = parti[satir["n"]]
+                        titel = (satir.get("titel") or "").strip()
+                        text = (satir.get("text") or "").strip()
+                        if len(text) > 80 and len(titel) > 8:
+                            h["t"], h["b"], h["ki"] = titel, text, True
+                            yeni_yazim += 1
+                    print(f"  + {model}: {len(parti)} haber yazıldı")
+                    basarili = True
+                    break
+                except Exception as hata:
+                    detay = ""
+                    if hasattr(hata, "read"):
+                        try:
+                            detay = hata.read().decode("utf-8")[:300]
+                        except Exception:
+                            pass
+                    print(f"  ! {model} başarısız: {hata} {detay}")
+                    # Çalışmayan modeli sıradan düş (sonuncusuysa kalsın)
+                    if len(model_sirasi) > 1 and model in model_sirasi:
+                        model_sirasi.remove(model)
+            if not basarili:
+                print("  ! Bu parti yazılamadı, RSS özetiyle kalıyor.")
+            time.sleep(10)  # dakikalık istek limitine nazik davran
     elif not GEMINI_KEY:
         print("GEMINI_KEY yok — RSS özetleriyle devam (test modu).")
 
