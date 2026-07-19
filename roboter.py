@@ -20,11 +20,51 @@ socket.setdefaulttimeout(15)  # asılı kalan kaynak tüm robotu bekletmesin
 CIKTI = os.path.join(os.path.dirname(os.path.abspath(__file__)),
                      "nachrichten.json")
 GEMINI_KEY = os.environ.get("GEMINI_KEY", "").strip()
-# Sıra önemli: önce bedava kotası yüksek hafif modeller denenir.
-GEMINI_MODELLER = ["gemini-2.5-flash-lite", "gemini-2.0-flash",
-                   "gemini-2.5-flash"]
+# Model adları Google'da sık değişiyor (eskiler yeni hesaplara kapatıldı) —
+# robot açılışta anahtarın erişebildiği modelleri sorup KENDİ seçer.
+# Liste hiç alınamazsa şu adlar denenir:
+YEDEK_MODELLER = ["gemini-flash-latest", "gemini-3-flash", "gemini-2.0-flash"]
 YAZIM_SINIRI = 24          # tek çalışmada en fazla bu kadar YENİ haber yazılır
 PARTI = 12                 # Gemini'ye tek istekte kaç haber verilir
+
+
+def modelleri_kesfet():
+    """Anahtarın kullanabildiği metin-üreten flash modellerini yeniden
+    eskiye sıralar (lite = kota dostu, önde)."""
+    try:
+        url = ("https://generativelanguage.googleapis.com/v1beta/models"
+               f"?key={GEMINI_KEY}&pageSize=200")
+        with urllib.request.urlopen(url, timeout=30) as c:
+            data = json.load(c)
+        adaylar = []
+        for m in data.get("models", []):
+            ad = m.get("name", "").split("/")[-1]
+            if "generateContent" not in m.get("supportedGenerationMethods", []):
+                continue
+            kucuk = ad.lower()
+            if "flash" not in kucuk:
+                continue
+            if any(k in kucuk for k in ("image", "tts", "audio", "live",
+                                        "embed", "thinking", "8b")):
+                continue
+            surum = re.search(r"(\d+)\.?(\d*)", kucuk)
+            puan = float(surum.group(1) + "." + (surum.group(2) or "0")) \
+                if surum else 0.0
+            if "latest" in kucuk:
+                puan += 50      # -latest takma adı her zaman günceldir
+            if "lite" in kucuk:
+                puan += 0.05    # lite'ın bedava kotası daha yüksek
+            if "preview" in kucuk or "exp" in kucuk:
+                puan -= 0.5
+            adaylar.append((puan, ad))
+        adaylar.sort(reverse=True)
+        secim = [a for _, a in adaylar][:5]
+        if secim:
+            print("Bulunan modeller (deneme sırası): " + ", ".join(secim))
+            return secim
+    except Exception as hata:
+        print(f"  ! Model listesi alınamadı: {hata}")
+    return YEDEK_MODELLER
 UST_SINIR = 90             # JSON'a girecek toplam haber
 
 QUELLEN = [
@@ -202,7 +242,7 @@ def main():
     yazilacak = [h for h in haberler if not h.get("ki")][:YAZIM_SINIRI]
 
     if GEMINI_KEY and yazilacak:
-        model_sirasi = list(GEMINI_MODELLER)
+        model_sirasi = modelleri_kesfet()
         for i in range(0, len(yazilacak), PARTI):
             parti = yazilacak[i:i + PARTI]
             basarili = False
