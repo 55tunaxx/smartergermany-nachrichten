@@ -69,6 +69,10 @@ UST_SINIR = 90             # JSON'a girecek toplam haber
 
 QUELLEN = [
     ("tagesschau", "https://www.tagesschau.de/index~rss2.xml", None),
+    # Uluslararası son dakika açığını kapatan iki ek kaynak (30.07 kontrolünde
+    # Japonya depremi / BM oylaması kaçmıştı):
+    ("tagesschau", "https://www.tagesschau.de/ausland/index~rss2.xml", "Ausland"),
+    ("DW", "https://rss.dw.com/rdf/rss-de-top", "Ausland"),
     ("ntv", "https://www.n-tv.de/politik/rss", "Politik"),
     ("ntv", "https://www.n-tv.de/wirtschaft/rss", "Wirtschaft"),
     ("ntv", "https://www.n-tv.de/sport/rss", "Sport"),
@@ -139,7 +143,8 @@ def feeds_topla():
                     "k": kategorie or kategorie_aus_link(link),
                     "z": int(zeit * 1000),
                     "i": None,
-                    "e": "eilmeldung" in link or "+++" in titel,
+                    "e": ("eilmeldung" in link.lower() or "+++" in titel
+                          or titel.lower().startswith("eilmeldung")),
                     "q": [name],
                 })
         except Exception as hata:
