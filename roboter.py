@@ -24,7 +24,10 @@ GEMINI_KEY = os.environ.get("GEMINI_KEY", "").strip()
 # robot açılışta anahtarın erişebildiği modelleri sorup KENDİ seçer.
 # Liste hiç alınamazsa şu adlar denenir:
 YEDEK_MODELLER = ["gemini-flash-latest", "gemini-3-flash", "gemini-2.0-flash"]
-YAZIM_SINIRI = 24          # tek çalışmada en fazla bu kadar YENİ haber yazılır
+# Koşumlar gecikirse (GitHub Actions 3-6 saat kayabiliyor) 60+ yeni haber
+# birikiyor; hepsi KI-metni alsın diye sınır 72 (= 6 parti, aralarda 10 sn).
+# Ortam değişkeniyle değiştirilebilir: YAZIM_SINIRI=36
+YAZIM_SINIRI = int(os.environ.get("YAZIM_SINIRI", "72") or 72)
 PARTI = 12                 # Gemini'ye tek istekte kaç haber verilir
 
 
