@@ -1,19 +1,35 @@
 # GitHub Actions iş akışı — repoda .github/workflows/roboter.yml yoluna konacak.
-# YEDEK hat: asıl robot, Tunahan'ın bilgisayarında Görev Zamanlayıcı ile 30 dk'da
-# bir koşar ve buraya push eder (roboter/yerel/calistir.ps1). Bu iş akışı yalnız
-# yayındaki nachrichten.json 75 dakikadan ESKİYSE (bilgisayar kapalı/çevrimdışı)
-# devreye girer; tazeyse hiçbir şey yapmadan biter. GitHub ücretsiz hesapta
-# zamanlanmış koşumları saatlerce geciktirebildiği için birkaç dakika dağıtıldı.
+#
+# İKİ HAT:
+#  • Akşam 17:00–01:00: asıl robot Tunahan'ın bilgisayarında Görev Zamanlayıcı
+#    ile 30 dk'da bir koşar ve buraya push eder (roboter/yerel/calistir.ps1).
+#  • Diğer saatler (bilgisayar kapalı): bu iş akışı. GitHub'ın cron'u ücretsiz
+#    hesapta saatlerce kayabilir; kullanıcı bunu kabul etti. İstenirse ileride
+#    cron-job.org gibi bir dış zamanlayıcı workflow_dispatch ile dürtebilir
+#    (bunun için Actions: Read and write izinli ayrı bir token gerekir).
+#
+# Çakışma olmasın diye: yayındaki nachrichten.json 35 dakikadan TAZEYSE
+# (bilgisayar az önce push etmiş) hiçbir şey yapmadan biter. Elle "Run
+# workflow" yaparken "zorla" kutusunu işaretlersen tazeliğe bakmadan çalışır.
 name: Nachrichten-Roboter
 
 on:
   schedule:
     - cron: "7,37 * * * *"
     - cron: "22,52 * * * *"
-  workflow_dispatch: {}
+  workflow_dispatch:
+    inputs:
+      zorla:
+        description: "Tazelik kontrolünü atla, hemen çalış"
+        type: boolean
+        default: false
 
 permissions:
   contents: write
+
+concurrency:
+  group: nachrichten-roboter
+  cancel-in-progress: false
 
 jobs:
   schreiben:
@@ -23,6 +39,8 @@ jobs:
 
       - name: Tazelik kontrolü
         id: taze
+        env:
+          ZORLA: ${{ inputs.zorla }}
         run: |
           python3 - <<'EOF' >> "$GITHUB_OUTPUT"
           import json, os, time
@@ -32,11 +50,10 @@ jobs:
               stand = 0
           yas = (time.time() - stand) / 60
           print(f"yas_dk={yas:.0f}")
-          # workflow_dispatch (elle) her zaman çalışır
-          zorla = os.environ.get("GITHUB_EVENT_NAME") == "workflow_dispatch"
-          print("calis=" + ("1" if (zorla or yas > 75) else "0"))
+          zorla = os.environ.get("ZORLA", "").lower() == "true"
+          print("calis=" + ("1" if (zorla or yas > 35) else "0"))
           EOF
-          echo "Yayındaki dosya yaşı: $(grep yas_dk "$GITHUB_OUTPUT" | tail -1) dakika"
+          echo "Yayındaki dosya yaşı: $(grep yas_dk "$GITHUB_OUTPUT" | tail -1 | cut -d= -f2) dakika"
 
       - if: steps.taze.outputs.calis == '1'
         uses: actions/setup-python@v5
@@ -57,6 +74,6 @@ jobs:
           git config user.name "roboter"
           git config user.email "roboter@users.noreply.github.com"
           git add nachrichten.json
-          git diff --cached --quiet || git commit -m "Nachrichten aktualisiert (Actions yedek)"
+          git diff --cached --quiet || git commit -m "Nachrichten aktualisiert (Actions)"
           git pull --rebase -X theirs || true
           git push
