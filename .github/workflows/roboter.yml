@@ -1,10 +1,15 @@
 # GitHub Actions iş akışı — repoda .github/workflows/roboter.yml yoluna konacak.
-# Her 30 dakikada bir robotu çalıştırır, değişiklik varsa nachrichten.json'u yayınlar.
+# YEDEK hat: asıl robot, Tunahan'ın bilgisayarında Görev Zamanlayıcı ile 30 dk'da
+# bir koşar ve buraya push eder (roboter/yerel/calistir.ps1). Bu iş akışı yalnız
+# yayındaki nachrichten.json 75 dakikadan ESKİYSE (bilgisayar kapalı/çevrimdışı)
+# devreye girer; tazeyse hiçbir şey yapmadan biter. GitHub ücretsiz hesapta
+# zamanlanmış koşumları saatlerce geciktirebildiği için birkaç dakika dağıtıldı.
 name: Nachrichten-Roboter
 
 on:
   schedule:
-    - cron: "*/30 * * * *"
+    - cron: "7,37 * * * *"
+    - cron: "22,52 * * * *"
   workflow_dispatch: {}
 
 permissions:
@@ -16,20 +21,42 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: actions/setup-python@v5
+      - name: Tazelik kontrolü
+        id: taze
+        run: |
+          python3 - <<'EOF' >> "$GITHUB_OUTPUT"
+          import json, os, time
+          try:
+              stand = json.load(open("nachrichten.json", encoding="utf-8")).get("stand", 0) / 1000
+          except Exception:
+              stand = 0
+          yas = (time.time() - stand) / 60
+          print(f"yas_dk={yas:.0f}")
+          # workflow_dispatch (elle) her zaman çalışır
+          zorla = os.environ.get("GITHUB_EVENT_NAME") == "workflow_dispatch"
+          print("calis=" + ("1" if (zorla or yas > 75) else "0"))
+          EOF
+          echo "Yayındaki dosya yaşı: $(grep yas_dk "$GITHUB_OUTPUT" | tail -1) dakika"
+
+      - if: steps.taze.outputs.calis == '1'
+        uses: actions/setup-python@v5
         with:
           python-version: "3.12"
 
-      - run: pip install feedparser
+      - if: steps.taze.outputs.calis == '1'
+        run: pip install feedparser
 
-      - run: python roboter.py
+      - if: steps.taze.outputs.calis == '1'
+        run: python roboter.py
         env:
           GEMINI_KEY: ${{ secrets.GEMINI_KEY }}
 
       - name: Yayınla
+        if: steps.taze.outputs.calis == '1'
         run: |
           git config user.name "roboter"
           git config user.email "roboter@users.noreply.github.com"
           git add nachrichten.json
-          git diff --cached --quiet || git commit -m "Nachrichten aktualisiert"
+          git diff --cached --quiet || git commit -m "Nachrichten aktualisiert (Actions yedek)"
+          git pull --rebase -X theirs || true
           git push
