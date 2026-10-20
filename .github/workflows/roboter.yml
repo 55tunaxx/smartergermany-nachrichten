@@ -14,9 +14,7 @@
 name: Nachrichten-Roboter
 
 on:
-  schedule:
-    - cron: "7,37 * * * *"
-    - cron: "22,52 * * * *"
+  # 2026-10-20: proje iptal edildi; zamanlanmis calisma KAPATILDI (yalniz elle Run workflow).
   workflow_dispatch:
     inputs:
       zorla:
